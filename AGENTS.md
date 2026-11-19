@@ -58,8 +58,8 @@ android 还多一道**签名指纹对拍**。
 
 | 位置 | 内容 |
 |---|---|
-| `test/packaging.test.js` `files.length` | 被打补丁的文件数（现 3） |
-| `test/packaging.test.js` hunk 总数 | 现 7（`index.html` 2 + `net.js` 3 + `room.js` 2） |
+| `test/packaging.test.js` `files.length` | 被打补丁的文件数（现 5） |
+| `test/packaging.test.js` hunk 总数 | 现 9（`index.html` 3 + `net.js` 2 + `room.js` 2 + `dev/uikit.html` 1 + `media.js` 1；0.4.0 把 net.js 的两个相邻 hunk 合成一个） |
 | `docs/PACKAGING.md` "N 个文件、N 个 hunk" | 同上 |
 
 ## 5. 跨版本兼容：唯一信号是 `/healthz.app`
@@ -92,7 +92,7 @@ android 还多一道**签名指纹对拍**。
    ⚠️ 整个 `describe(..., { skip: ... })` 被跳过时**不进 `skipped` 计数、也不显示在汇总里**，只看数字会以为契约组跑了 —— 判据是行首那个 `﹣`。
    本机 checkout 在 `D:/Code/Stronghold-Protocol-upstream`（`client.config.json` 默认的 `../Stronghold-Protocol` 不存在），
    所以上面两个数字是同一条命令的两种模式：`SP_GAME_ROOT=... npm test` / `npm test`。
-   要紧的是这几组判据都在测试里：`game-client.patch` 的 3 文件 7 hunk、四道 payload/产物闸门各自在 workflow 里存在且顺序对、
+   要紧的是这几组判据都在测试里：`game-client.patch` 的 5 文件 9 hunk、四道 payload/产物闸门各自在 workflow 里存在且顺序对、
    **三条产物路各自都要有"产物内闸门"且排在真编出字节的那步之后**（desktop / android / ios 三条，切片必须按 job 边界切，
    不然第三个 job 会让前一条的断言蒙对）、
    `__SP_MEDIA_ALIAS__` 两个宿主各写各的、镜像字体的三条行为道（壳发镜像的 mime+长缓存+逃逸、纯静态等价道、payload 出处），

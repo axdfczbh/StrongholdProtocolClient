@@ -1,30 +1,99 @@
+diff --git a/public/dev/uikit.html b/public/dev/uikit.html
+index 77f8dfa..9076be2 100644
+--- a/public/dev/uikit.html
++++ b/public/dev/uikit.html
+@@ -10,10 +10,7 @@
+   <meta name="viewport" content="width=device-width, initial-scale=1" />
+   <title>UI Kit · 卫戍协议：盟约</title>
+   <link rel="icon" href="data:," />
+-  <link rel="preconnect" href="https://fonts.googleapis.com" />
+-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+-  <link rel="stylesheet" media="print" data-web-fonts
+-        href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700;900&family=Oxanium:wght@400;500;600;700&family=Rajdhani:wght@500;600;700&display=swap" />
++  <link rel="stylesheet" media="print" data-web-fonts href="/webfonts/google/google.css" />
+   <link rel="stylesheet" href="/fonts/fonts.css" />
+   <link rel="stylesheet" href="/css/theme.css" />
+   <link rel="stylesheet" href="/css/components.css" />
 diff --git a/public/index.html b/public/index.html
-index 82a085e..360d735 100644
+index f76ba0e..92b77c4 100644
 --- a/public/index.html
 +++ b/public/index.html
-@@ -50,2 +50,4 @@
+@@ -22,11 +22,9 @@
+   <link rel="icon" href="/icons/app.svg" type="image/svg+xml" sizes="any" />
+   <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" sizes="180x180" />
+ 
+-  <!-- Web fonts: never render-blocking (LAN/offline play must still start); system fallbacks in theme.css. -->
+-  <link rel="preconnect" href="https://fonts.googleapis.com" />
+-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+-  <link rel="stylesheet" media="print" data-web-fonts
+-        href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700;900&family=Oxanium:wght@400;500;600;700&family=Rajdhani:wght@500;600;700&display=swap" />
++  <!-- Web fonts: never render-blocking (LAN/offline play must still start); system fallbacks in theme.css.
++       Packaged clients self-host the same glyphs (payload webfonts/google/): no third-party host, no stall. -->
++  <link rel="stylesheet" media="print" data-web-fonts href="/webfonts/google/google.css" />
+   <script src="/js/webFonts.js" defer></script>
+   <!-- Self-hosted Bender / Novecento (provided by the assets pipeline). -->
+   <link rel="stylesheet" href="/fonts/fonts.css" />
+@@ -55,6 +53,8 @@
+   <link rel="stylesheet" href="/css/emotes.css" />
    <link rel="stylesheet" href="/css/devices.css" />
+   <link rel="stylesheet" href="/css/ui-theme.css" />
 +  <!-- Packaged clients: HUD scale on short landscape screens (see shell/display.css). -->
 +  <link rel="stylesheet" href="/css/shell-display.css" />
  
-@@ -85,2 +87,5 @@
+   <script type="importmap">
+     { "imports": { "preact": "/vendor/preact.module.js", "preact/hooks": "/vendor/hooks.module.js", "htm": "/vendor/htm.module.js" } }
+@@ -90,6 +90,9 @@
+   <noscript><p style="color:#c3cbc7;text-align:center;padding:40px">需要启用 JavaScript 才能运行本游戏。</p></noscript>
+ 
    <script src="/js/boot.js"></script>
 +  <!-- Packaged-client server address (empty in the web build → the page's own origin). Must run before /js/main.js. -->
 +  <script src="/js/runtime-config.js"></script>
 +  <script type="module" src="/js/shell/picker.js"></script>
    <script type="module" src="/js/main.js" id="sp-main"></script>
+   <script nomodule src="/js/bootLegacy.js"></script>
+ 
+diff --git a/public/js/media.js b/public/js/media.js
+index ff46a92..95e388b 100644
+--- a/public/js/media.js
++++ b/public/js/media.js
+@@ -40,8 +40,20 @@ const PLUGIN_AUDIO = /^\/p\/[a-z0-9][a-z0-9-]{1,31}\/[0-9a-f]{8}\/(.+)$/;
+  * @param {string} [origin] origin of the page; defaults to `location.origin`
+  * @returns {string} a URL safe to pass to fetch()
+  */
++/**
++ * Whether this host can resolve the extension-less alias at all. Only something that implements it may be asked for
++ * it: the game server (`server/http/static.js` serveMedia) and the desktop shell (`desktop/serve.mjs`). Capacitor
++ * serves `www/` as plain static files, so on Android the alias is a guaranteed 404 and every BGM/sfx would be silent —
++ * those builds set `__SP_MEDIA_ALIAS__ = false` and keep the direct `/assets/audio/…` URLs, which every host serves.
++ * @param {object} [env] @returns {boolean}
++ */
++export function mediaAliasEnabled(env = globalThis) {
++  return env?.__SP_MEDIA_ALIAS__ !== false;
++}
++
+ export function mediaUrl(url, origin = globalThis.location?.origin) {
+   if (typeof url !== 'string' || !url) return url;
++  if (!mediaAliasEnabled()) return url;
+   let u;
+   // No origin known (Node / tests): parse relative URLs against a placeholder, absolute ones are rejected below.
+   try { u = new URL(url, origin || 'http://localhost'); } catch { return url; }
 diff --git a/public/js/net.js b/public/js/net.js
-index ce2d362..b9afbf8 100644
+index 2be675b..cdceb1d 100644
 --- a/public/js/net.js
 +++ b/public/js/net.js
-@@ -2,3 +2,5 @@
+@@ -1,6 +1,8 @@
+ // WebSocket client for the game server (DESIGN §8).
  //
 -// - One socket at ws(s)://<host>/ws, JSON text frames `{ t, ...payload }`.
 +// - One socket at ws(s)://<host>/ws, JSON text frames `{ t, ...payload }`. The host is the page's own origin
 +//   unless the client is packaged (Electron / Android): `/js/runtime-config.js` then sets `globalThis.__SP_SERVER__`
 +//   to the game server it was built for (default `localhost:3000`), and `?server=host` overrides it for one session.
  // - Auto-reconnect with exponential backoff + jitter; a heartbeat (`ping`) measures latency and
-@@ -94,4 +96,80 @@ export function backoffDelay(attempt, rand = Math.random) {
+ //   detects dead sockets (a ping left unanswered — no inbound frame at all — for DEAD_AFTER_MS ⇒
+ //   close ⇒ reconnect). Measured from the oldest unanswered ping, not from the last inbound frame,
+@@ -99,11 +101,89 @@ export function backoffDelay(attempt, rand = Math.random) {
+ }
+ 
  /**
 - * WebSocket URL for the current page (`ws(s)://host/ws`).
 - * @param {{protocol: string, host: string}} [loc]
@@ -107,28 +176,28 @@ index ce2d362..b9afbf8 100644
 + * WebSocket URL for the current page (`ws(s)://host/ws`), honouring the packaged-client server override.
 + * @param {{protocol: string, host: string, search?: string}} [loc]
   * @returns {string}
-@@ -99,2 +177,4 @@ export function backoffDelay(attempt, rand = Math.random) {
+  */
  export function defaultWsUrl(loc = globalThis.location) {
 +  const target = resolveServerTarget(loc);
 +  if (target) return toWsUrl(target);
    if (!loc || !loc.host) return 'ws://localhost:3000/ws';
+   return `${loc.protocol === 'https:' ? 'wss' : 'ws'}://${loc.host}/ws`;
+ }
 diff --git a/public/js/screens/room.js b/public/js/screens/room.js
-index d3729e4..d505054 100644
+index 097d42c..6568585 100644
 --- a/public/js/screens/room.js
 +++ b/public/js/screens/room.js
-@@ -27,9 +27,9 @@ import { GuideButton } from '../ui/guide.js';
- import { openStats } from './stats.js';
- import { SettingsButton } from '../ui/settings.js';
- import { LoadoutButton } from './loadout.js';
- import { PluginTag, isModdedRoom } from '../ui/pluginTag.js';
- import { hasScriptConsent, rememberScriptConsent } from '../content.js';
+@@ -65,7 +65,7 @@ import { VersionVote, versionVoteOf } from '../ui/versionVote.js';
+ import { VersionPicker } from '../ui/versionPicker.js';
+ import { DEFAULT_VERSION, ladderModes, lobbyVersion, needsContent, offeredDifficulties, roomVersion, seasonOf, serverDefaultVersion, soloTimedOf, soloTimeMsgid, versionLabel } from '../versions.js';
+ import { hasScriptConsent, rememberScriptConsent, pageVersion } from '../content.js';
 -import { net } from '../net.js';
 +import { net, resolveServerTarget, toHttpUrl } from '../net.js';
- import { store, useStore, shallowEqual, emptyMatch, isSpectating } from '../store.js';
- import { difficultyInfo } from './lobby.js';
- import { t, tc } from '../../../shared/i18n.js';
-@@ -84,10 +84,11 @@ export function aiLastOption(room, myId) {
-   return { on: room.aiPicksLast === true, editable: room.hostId != null && room.hostId === myId };
+ import { store, useStore, shallowEqual, emptyMatch, isSpectating, savePref } from '../store.js';
+ import { data, useData, getConfig } from '../data.js';
+ import { chessAvatarUrl, chessPortraitUrl } from '../ui/assetUrls.js';
+@@ -192,10 +192,11 @@ export function botNameParts(seat) {
+   return m ? [m[1], m[2]] : null;
  }
  
 -/** Invite link for a room code (current page URL with ?room=CODE). */

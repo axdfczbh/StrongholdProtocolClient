@@ -824,6 +824,20 @@ if (savedAddress) globalThis.__SP_SERVER__ = bootUrlOf(savedAddress) || savedAdd
 /** The server the game is booting with: public/js/net.js reads __SP_SERVER__ when it opens the socket. */
 const bootTarget = keyOf(globalThis.__SP_SERVER__);
 
+/**
+ * Tell the loopback shell which server this page is booting for (desktop/serve.mjs `POST /sp/upstream`). The shell
+ * serves the page itself, so another official version's `/cs/…` set — one this payload was not packed with — has to
+ * be fetched from THIS server; without the report the shell can only guess from `build.json`. Fire and forget: a
+ * browser or Capacitor host has no such endpoint, and nothing here may depend on one.
+ */
+function reportUpstream(httpUrl) {
+  try {
+    void fetch('/sp/upstream', { method: 'POST', body: httpUrl, cache: 'no-store' }).catch(() => {});
+  } catch { /* no endpoint on this host */ }
+}
+
+if (bootTarget) reportUpstream(toHttpUrl(bootTarget));
+
 const forced = new URLSearchParams(globalThis.location?.search || '').get('pick') === '1';
 const chosenThisSession = readItem(K_CHOSEN, 'sessionStorage') === '1';
 const autostart = autostartOn(readItem(K_AUTOSTART, 'localStorage'), isAndroid());

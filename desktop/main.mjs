@@ -91,16 +91,25 @@ log(`payload 来源：${WWW_PICK.source || '(没有一个候选可用，退回�
 for (const r of WWW_PICK.rejected) log(`  跳过 ${r.source}（${r.dir}）：${r.why}`);
 
 /**
- * 自动更新的检查（docs/AUTO-UPDATE.md §3 第 3 步）。三个刻意的取舍：
- *  - **后台、不挡启动**：窗口已经出来了才查，失败也只是日志里一行，绝不弹框 —— 大陆连 GitHub 时好时坏，
- *    "取不到"是常态而不是故障。
- *  - **只为下一次启动准备**：更新写成 `<userData>/payload/current` 后不 reload 当前窗口，
- *    否则一局打到一半会被换掉脚下的那份代码。
- *  - **开发跑不查**：overlay 排在仓库构建产物前面（payload-path.mjs 的次序），真应用一份会把本地改动挡住；
- *    `SP_UPDATE=1` 可以强制打开，`--no-update` / `SP_NO_UPDATE=1` 可以关掉。
+ * 自动更新的检查（docs/AUTO-UPDATE.md §3 第 3 步）。
+ *
+ * **本分支默认不查，而且没有自己的源就绝不查。** 原因不是技术：`updater.mjs` 的内置指针指向原作者自己的
+ * 服务器（`https://lain42.top/...`），把它当成本分支的更新源，等于让玩家的客户端被降级 / 被换成旧 payload，
+ * 同时让别人的服务器承担我们的流量。社区维护的分支自己带自己的指针才算干净。
+ *
+ * 要开就同时给两个环境变量：`SP_UPDATE=1` + `SP_POINTER_URL=<你自己的 stable.json>`。
+ * 原来的三个取舍保留：后台不挡启动、只为下一次启动准备、开发跑不查。
  */
-function startUpdateCheck() {  if (!app.isPackaged && !process.env.SP_UPDATE) return;
-  if (process.env.SP_NO_UPDATE || process.argv.includes('--no-update')) { log('[update] 已关闭（--no-update / SP_NO_UPDATE）'); return; }
+function startUpdateCheck() {
+  if (!app.isPackaged && !process.env.SP_UPDATE) return;
+  if (process.env.SP_NO_UPDATE || process.argv.includes('--no-update')) {
+    log('[update] 已关闭（--no-update / SP_NO_UPDATE）');
+    return;
+  }
+  if (!process.env.SP_UPDATE || !process.env.SP_POINTER_URL) {
+    log('[update] 已关闭（本分支不带更新源；要开：SP_UPDATE=1 SP_POINTER_URL=<自己的指针>）');
+    return;
+  }
   runUpdate({
     payloadDir: path.join(app.getPath('userData'), OVERLAY_DIR),
     artDir: path.join(WWW, 'assets'),

@@ -161,28 +161,164 @@ export function parseRange(header, size) {
 }
 
 /**
+ * The `/cs/<cs16>/…` prefix: another official version's content set, which the page asks for relative to its own
+ * origin (public/js/content.js loadVersionSet). The payload carries the sets tools/version-sets.mjs generated, i.e.
+ * the ones belonging to the build it was made from.
+ */
+export const CONTENT_SET_PREFIX = '/cs/';
+/** How long the content-set fallback waits for the game server before the request just 404s. */
+export const CONTENT_SET_TIMEOUT_MS = 5000;
+
+/**
+ * `POST /sp/upstream` — where the picker reports the server this page is booting for (shell/picker.js). It is the one
+ * fact the loopback server cannot see on its own: the picker hands the address to the *page* (`globalThis.__SP_SERVER__`
+ * then `location.reload()`), never to this process, and the content-set fallback has to ask that same server.
+ */
+export const UPSTREAM_REPORT = '/sp/upstream';
+
+/** `http(s)://host[:port]` of an address, or null. Anything else (a bare host, a ws:// URL, junk) is refused. */
+export function toOrigin(raw) {
+  try {
+    const u = new URL(String(raw).trim());
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
+    return `${u.protocol}//${u.host}`;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The game server a payload was built for (`build.json`'s `server`), normalised without its trailing slash, or null.
+ * @param {string} root payload root
+ * @returns {string|null}
+ */
+export function readUpstream(root) {
+  try {
+    const j = JSON.parse(fs.readFileSync(path.join(root, 'build.json'), 'utf8'));
+    const raw = String(j?.server ?? '').trim();
+    return /^https?:\/\//i.test(raw) ? raw.replace(/\/+$/, '') : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Ask the game server for one `/cs/…` file the payload does not carry.
+ *
+ * The payload's own copy covers the server it was packaged for. A client pointed at a *different* build (a friend's
+ * server, a newer release) would otherwise end every match at 「版本数据校验失败」, because the page's relative
+ * `/cs/` request lands on this loopback server and its cs16 is not the one bundled. The manifest is content-addressed
+ * and hash-checked by the page, so a relayed one is exactly as trustworthy as a bundled one — no local file is ever
+ * replaced, the fallback only runs after the disk says 404.
+ *
+ * @param {string} upstream e.g. `http://150.158.38.174:3000`
+ * @param {string} rawUrl the request URL (query string ignored)
+ * @param {number} timeoutMs
+ * @param {{ warn?: Function }} log
+ * @returns {Promise<{ status: number, headers: Record<string, string>, body: Buffer } | null>} null: not a content
+ *          set, or the server did not answer
+ */
+async function fetchContentSet(upstream, rawUrl, timeoutMs, log) {
+  const pathname = rawUrl.split('?')[0];
+  let decoded;
+  try { decoded = decodeURIComponent(pathname); } catch { return null; }
+  if (!decoded.startsWith(CONTENT_SET_PREFIX) || decoded.includes('..') || decoded.includes('\\')) return null;
+
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(upstream + pathname, { signal: ctrl.signal, cache: 'no-store' });
+    const body = Buffer.from(await res.arrayBuffer());
+    return {
+      status: res.status,
+      body,
+      headers: {
+        'Content-Type': res.headers.get('content-type') || 'application/json; charset=utf-8',
+        'Cache-Control': NO_CACHE,
+        'Content-Length': String(body.length),
+        // Observable on purpose: a test (and a bug report) can tell a relayed set from a bundled one.
+        'X-SP-Content-Set': 'upstream',
+      },
+    };
+  } catch (e) {
+    log.warn?.(`[client] ${pathname} is not in the payload and ${upstream} did not answer (${e?.name || e?.message || e}) — the version set will fail its check`);
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
  * Start the loopback static server.
  *
  * `port > 0` is preferred and, if it is busy, the next PORT_SEARCH consecutive ports are tried before giving up
  * and letting the OS pick one (`port: 0`). The caller keeps the resulting origin stable by passing a fixed port
  * (see DEFAULT_PORT) — persistence in the page depends on it.
  *
- * @param {{ root: string, host?: string, port?: number, log?: { warn?: Function, error?: Function } }} opts
+ * `upstream` is the game server the content-set fallback asks (see fetchContentSet). Omitted = derived from
+ * `<root>/build.json`; `null` = no fallback at all.
+ *
+ * @param {{ root: string, host?: string, port?: number, log?: { warn?: Function, error?: Function }, lan?: any,
+ *           upstream?: string | null }} opts
  * @returns {Promise<{ url: string, port: number, server: http.Server, close: () => Promise<void> }>}
  */
-export function createStaticServer({ root, host = '127.0.0.1', port = 0, log = console, lan = null } = {}) {
+export function createStaticServer({ root, host = '127.0.0.1', port = 0, log = console, lan = null, upstream } = {}) {
   const rootAbs = path.resolve(root);
+  const gameServer = upstream === undefined ? readUpstream(rootAbs) : upstream;
+  /** The server the page reported it is booting for (see UPSTREAM_REPORT); null until the picker says so. */
+  let pickedUpstream = null;
+  const activeUpstream = () => pickedUpstream || gameServer;
 
   const finish = (req, res, status, headers, body) => {
     res.writeHead(status, headers);
     res.end(req.method === 'HEAD' ? undefined : body);
   };
 
+  /**
+   * `POST /sp/upstream` (same origin only): remember the server the page is booting for, so the content-set fallback
+   * asks THAT server. `GET` answers with the active one (testability + a bug report can read it).
+   * @returns {Promise<boolean>} true when the request was this endpoint
+   */
+  async function handleUpstreamReport(req, res) {
+    if ((req.url || '').split('?')[0] !== UPSTREAM_REPORT) return false;
+    // Browsers always send Origin on a POST; anything that is not this shell's own page is refused (a random site
+    // must not be able to point the fallback at itself).
+    const origin = String(req.headers.origin || '');
+    if (origin && origin !== `http://${req.headers.host}`) {
+      finish(req, res, 403, { 'Content-Type': 'text/plain; charset=utf-8' }, 'forbidden');
+      return true;
+    }
+    if (req.method === 'GET') {
+      finish(req, res, 200, { 'Content-Type': 'application/json; charset=utf-8' }, JSON.stringify({ upstream: activeUpstream() }));
+      return true;
+    }
+    if (req.method !== 'POST') {
+      res.setHeader('Allow', 'GET, POST');
+      finish(req, res, 405, { 'Content-Type': 'text/plain; charset=utf-8' }, 'method not allowed');
+      return true;
+    }
+    let body = '';
+    for await (const chunk of req) {
+      body += chunk;
+      if (body.length > 512) { finish(req, res, 413, { 'Content-Type': 'text/plain; charset=utf-8' }, 'too large'); return true; }
+    }
+    const normalized = toOrigin(body);
+    if (!normalized) {
+      finish(req, res, 400, { 'Content-Type': 'text/plain; charset=utf-8' }, 'an http(s) origin is required');
+      return true;
+    }
+    pickedUpstream = normalized;
+    log.info?.(`[client] content-set fallback will ask ${normalized}`);
+    finish(req, res, 204, {}, undefined);
+    return true;
+  }
+
   async function handle(req, res) {
     // The virtual-LAN sidecar owns `/lan/*` (see lan.mjs). It answers same-origin so the picker needs neither a
     // second origin nor a CORS rule; when no sidecar is wired the paths simply fall through to a 404 below, which
     // the picker reads as "this build cannot do LAN play".
     if (lan && await lan.handle(req, res)) return;
+    if (await handleUpstreamReport(req, res)) return;
     if (req.method !== 'GET' && req.method !== 'HEAD') {
       res.setHeader('Allow', 'GET, HEAD');
       finish(req, res, 405, { 'Content-Type': 'text/plain; charset=utf-8' }, 'method not allowed');
@@ -211,6 +347,16 @@ export function createStaticServer({ root, host = '127.0.0.1', port = 0, log = c
       if (!stat.isFile()) throw Object.assign(new Error('not a file'), { code: 'ENOENT' });
     } catch (e) {
       const status = e && (e.code === 'EACCES' || e.code === 'EPERM') ? 403 : 404;
+      // A content set this payload was not built for: ask the server the payload names (see fetchContentSet). Only
+      // after the disk has said 404, and only for GET/HEAD, so a bundled set is always served from disk.
+      const asked = activeUpstream();
+      if (status === 404 && asked && (req.method === 'GET' || req.method === 'HEAD')) {
+        const relayed = await fetchContentSet(asked, req.url || '/', CONTENT_SET_TIMEOUT_MS, log);
+        if (relayed) {
+          finish(req, res, relayed.status, relayed.headers, req.method === 'HEAD' ? undefined : relayed.body);
+          return;
+        }
+      }
       finish(req, res, status, { 'Content-Type': 'text/plain; charset=utf-8' }, status === 403 ? 'forbidden' : 'not found');
       return;
     }

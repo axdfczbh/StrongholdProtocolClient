@@ -53,6 +53,12 @@ function makeGameFixture() {
   write(root, 'public/js/net.js', "// net\n/** WebSocket URL. */\nexport function defaultWsUrl() { return 'ws://x/ws'; }\n");
   write(root, 'public/js/screens/room.js', '// room\n/** Invite link. */\nexport function inviteLink(code) { return `?room=${code}`; }\n');
   write(root, 'public/js/main.js', 'export {};\n');
+  // A second shipped page that names Google's font host (0.4.0's dev/uikit.html does); the patch swaps both pages
+  // over to the payload's own mirror, and assertPatched() refuses a payload that still names the host.
+  write(root, 'public/dev/uikit.html', '<html>\n<link rel="stylesheet" media="print" data-web-fonts\n      href="https://fonts.googleapis.com/css2?family=X" />\n</html>\n');
+  // 0.4.0 already emits the extension-less /media/… alias; the patch adds the switch a Capacitor build uses to keep
+  // the real /assets/audio URLs (build-clients.yml writes __SP_MEDIA_ALIAS__ = false into that lane's runtime-config).
+  write(root, 'public/js/media.js', 'export function mediaUrl(url) { return `${url}`; }\n');
   write(root, 'public/assets/char/x.png', 'png');
   // a vendored ES module of the shape three.js ships: an ES2022 class static block, which iOS 15 cannot parse
   // (tools/safari15-syntax.mjs lowers it on the way into the payload)
@@ -73,9 +79,10 @@ function makeGameFixture() {
     'diff --git a/public/index.html b/public/index.html',
     '--- a/public/index.html',
     '+++ b/public/index.html',
-    '@@ -1,3 +1,6 @@',
+    '@@ -1,3 +1,7 @@',
     ' <html>',
     '+<link rel="stylesheet" href="/css/shell-display.css">',
+    '+<link rel="stylesheet" media="print" data-web-fonts href="/webfonts/google/google.css" />',
     '+<script src="/js/runtime-config.js"></script>',
     '+<script type="module" src="/js/shell/picker.js"></script>',
     ' <script type="module" src="/js/main.js"></script>',
@@ -96,6 +103,21 @@ function makeGameFixture() {
     '+// patched: invite links use toHttpUrl()',
     ' /** Invite link. */',
     ' export function inviteLink(code) { return `?room=${code}`; }',
+    'diff --git a/public/dev/uikit.html b/public/dev/uikit.html',
+    '--- a/public/dev/uikit.html',
+    '+++ b/public/dev/uikit.html',
+    '@@ -1,4 +1,3 @@',
+    ' <html>',
+    '-<link rel="stylesheet" media="print" data-web-fonts',
+    '-      href="https://fonts.googleapis.com/css2?family=X" />',
+    '+<link rel="stylesheet" media="print" data-web-fonts href="/webfonts/google/google.css" />',
+    ' </html>',
+    'diff --git a/public/js/media.js b/public/js/media.js',
+    '--- a/public/js/media.js',
+    '+++ b/public/js/media.js',
+    '@@ -1,1 +1,2 @@',
+    ' export function mediaUrl(url) { return `${url}`; }',
+    '+export function mediaAliasEnabled(env = globalThis) { return env?.__SP_MEDIA_ALIAS__ !== false; }',
     '',
   ].join('\n'));
   return { root, patchFile };
@@ -104,9 +126,11 @@ function makeGameFixture() {
 describe('unified diff applier', () => {
   test('parses files and hunks', () => {
     const files = parsePatch(readFileSync(path.join(ROOT, 'patches', 'game-client.patch'), 'utf8'));
-    assert.equal(files.length, 3);
+    assert.equal(files.length, 5);
     assert.deepEqual(files.map((f) => stripPath(f.newPath, 2)).sort(), [...PATCHED_FILES].sort());
-    assert.equal(files.reduce((n, f) => n + f.hunks.length, 0), 7);
+    // 9: index.html 3 (font swap + the two shell insertions) + net.js 2 + room.js 2 + dev/uikit.html 1 + media.js 1.
+    // The pin is "the patch is what we regenerated", not a magic number — see AGENTS.md §4.
+    assert.equal(files.reduce((n, f) => n + f.hunks.length, 0), 9);
   });
 
   test('applies a patch, and refuses to apply it where the context no longer matches', () => {
@@ -644,9 +668,10 @@ describe('desktop shell: a stable loopback origin keeps localStorage', () => {
       assert.equal(absent.status, 404, 'positive control: this lane really opens the disk, it does not answer 200 to everything');
 
       // The reference form is what makes this host-independent: every slice must be addressed from the root, never
-      // relatively, or a nested page would ask for /dev/webfonts/… and get nothing.
-      if (GAME_ROOT) {
-        const real = readFileSync(path.join(GAME_ROOT, 'public', 'webfonts', 'google', 'google.css'), 'utf8');
+      // relatively, or a nested page would ask for /dev/webfonts/… and get nothing. The sheet lives in THIS repo
+      // (webfonts/google/, mirrored into the payload by package-client.mjs), never in the game checkout.
+      {
+        const real = readFileSync(path.join(ROOT, 'webfonts', 'google', 'google.css'), 'utf8');
         const urls = [...new Set([...real.matchAll(/url\(([^)]+)\)/g)].map((m) => m[1].trim().replace(/^['"]|['"]$/g, '')))];
         assert.ok(urls.length > 100, `镜像里只找到 ${urls.length} 个 url() —— 读错了文件，这条测试就是空的`);
         assert.deepEqual(urls.filter((u) => !u.startsWith('/webfonts/google/')), [],

@@ -10,6 +10,8 @@
 //                      data/    ← data/ (+ an empty local-assets.json when the optional local art is absent)
 //                      shared/  ← shared/
 //                      sim/     ← server/sim/**/*.js minus the Node-only loader
+//                      cs/<cs16>/index.json, cs/<cs16>/bounds/official.json  ← the official versions' content sets
+//                                 (tools/version-sets.mjs: the page asks for them relative to its own origin)
 //                      data.js  ← DATA_SHIM_JS (browser stand-in for server/data.js)
 //                      build.json, js/runtime-config.js, js/shell/*, css/shell-display.css  ← generated (which server
 //                                                                             / which game commit / shell hooks)
@@ -27,6 +29,7 @@ import { spawnSync } from 'node:child_process';
 import { DATA_SHIM_JS, GAME_MOUNTS, SIM_PRIVATE, findGameRoot, readAppVersion, readProtocolVersion, verifyGameContract } from './game-contract.mjs';
 import { PATCHED_FILES, applyPayloadPatch, assertPatched } from './payload-patches.mjs';
 import { lowerClassStaticBlocks } from './safari15-syntax.mjs';
+import { writeVersionSets } from './version-sets.mjs';
 
 export const CLIENT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const DEFAULT_SERVER = 'localhost:3000';
@@ -114,11 +117,14 @@ export function assembleClient(opts = {}) {
   }
   for (const rel of LOWERED) DERIVED.add(rel);
 
-  /** Mirror one source tree into the payload; every mirrored path is recorded in `expected`. */
-  const mirror = (relSrc, relDst, keep = null) => {
-    const srcRoot = path.join(gameRoot, relSrc);
+  /**
+   * Mirror one source tree (an absolute root) into the payload; every mirrored path is recorded in `expected`.
+   * @param {string} srcRoot @param {string} relDst @param {((rel: string) => boolean) | null} [keep]
+   * @param {string} [label] what to name when the tree is missing
+   */
+  const mirrorTree = (srcRoot, relDst, keep = null, label = srcRoot) => {
     if (!fs.existsSync(srcRoot)) {
-      warn(`package-client: ${relSrc}/ 不存在 —— payload 会不完整`);
+      warn(`package-client: ${label}/ 不存在 —— payload 会不完整`);
       return;
     }
     const stack = [''];
@@ -158,10 +164,20 @@ export function assembleClient(opts = {}) {
     }
   };
 
+  /** Mirror one mount of the game checkout (`relSrc` is relative to it). */
+  const mirror = (relSrc, relDst, keep = null) => mirrorTree(path.join(gameRoot, relSrc), relDst, keep, relSrc);
+
   for (const m of GAME_MOUNTS) {
     if (m.optional && !fs.existsSync(path.join(gameRoot, m.src))) continue;
     mirror(m.src, m.dst, MOUNT_KEEP[m.dst] ?? null);
   }
+
+  // The self-hosted font mirror (payload `webfonts/google/**`). 0.4.0 upstream still links fonts.googleapis.com, and a
+  // packaged client must ask nothing of a third party: a mainland-reachable or LAN/offline player stalls on that
+  // stylesheet. The glyphs are vendored in THIS repo (the game repo never commits them) and patches/game-client.patch
+  // points index.html and dev/uikit.html at the mirror; tools/check-payload-offline.mjs is the gate that keeps both
+  // halves honest.
+  mirrorTree(path.join(CLIENT_ROOT, 'webfonts'), 'webfonts', null, 'webfonts（本仓库的品牌字形镜像）');
 
   /** Write a generated file (only when its content changed, so mtimes stay stable across rebuilds). */
   const writeGenerated = (relDst, body) => {
@@ -199,6 +215,12 @@ export function assembleClient(opts = {}) {
   // without the tool ships no index at all, and lang.js then offers Chinese plus a stored code (its documented fallback).
   const packsIndex = packIndexOfCheckout({ gameRoot, warn });
   if (packsIndex !== null) writeGenerated('packs/index.json', packsIndex);
+  // /cs/ — the official versions' content sets (0.4.0, tools/version-sets.mjs). The page asks for them relative to
+  // its own origin (public/js/content.js loadVersionSet), which in a packaged client is this payload's static server,
+  // so the payload has to answer them; without them every version but 第二期下半 fails its check — including
+  // 规程·序列Ⅰ, 0.4.0's lobby default.
+  const versionSets = writeVersionSets({ gameRoot, out, log, warn });
+  if (versionSets) for (const rel of versionSets.files) expected.add(path.resolve(out, rel));
   // What this payload was built from — the packaged clients report it (update checks, bug reports). Deliberately
   // free of timestamps so an unchanged payload stays byte-identical (and therefore incremental).
   const game = gameInfo(gameRoot);

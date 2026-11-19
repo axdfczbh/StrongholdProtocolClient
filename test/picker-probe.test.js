@@ -12,7 +12,7 @@
 
 import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, mkdirSync, writeFileSync, cpSync, mkdtempSync, rmSync } from 'node:fs';
+import { readFileSync, mkdirSync, writeFileSync, cpSync, mkdtempSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
@@ -80,6 +80,17 @@ function scriptWorld(w = {}) {
     }
 
     close() { this.readyState = 3; }
+
+    // Speak the protocol the probe actually waits for: `probeOnce` only calls a socket good after a `welcome` frame,
+    // and takes the row's RTT from the matching `pong`. A mute socket could never be a green row, so the fixture has
+    // to answer `hello`/`ping` the way the game server does — otherwise these cases assert against a world that
+    // cannot exist (they are skipped in CI, which has no game checkout, so nothing noticed).
+    send(data) {
+      let msg = null;
+      try { msg = JSON.parse(data); } catch { return; }
+      if (msg?.t === 'hello') setTimeout(() => this.onmessage?.({ data: JSON.stringify({ t: 'welcome', app: '0.1.0' }) }), 1);
+      else if (msg?.t === 'ping') setTimeout(() => this.onmessage?.({ data: JSON.stringify({ t: 'pong', c: msg.c }) }), 1);
+    }
   };
 
   globalThis.fetch = (url, opts = {}) => {
@@ -113,6 +124,15 @@ describe('the server probe', { skip: GAME_ROOT ? false : 'no Stronghold-Protocol
       const target = path.join(payload, f);
       mkdirSync(path.dirname(target), { recursive: true });
       writeFileSync(target, readFileSync(path.join(GAME_ROOT, 'public', f), 'utf8'));
+    }
+    // 0.4.0's net.js imports the peer transport (`./p2p.js`), which itself imports nothing — one extra file completes
+    // the module graph this lane loads. An older checkout has no such file, and then there is nothing to copy.
+    for (const f of ['js/p2p.js']) {
+      const src = path.join(GAME_ROOT, 'public', f);
+      if (!existsSync(src)) continue;
+      const target = path.join(payload, f);
+      mkdirSync(path.dirname(target), { recursive: true });
+      writeFileSync(target, readFileSync(src, 'utf8'));
     }
     applyPayloadPatch({ gameRoot: GAME_ROOT, payloadRoot: payload });
     assertPatched(payload);

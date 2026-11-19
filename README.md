@@ -1,8 +1,13 @@
 # Stronghold Protocol · 端侧客户端打包
 
+> **这是社区维护分支，不是原作者发布的版本。**
+> 上游是 [lilyco-42/StrongholdProtocolClient](https://github.com/lilyco-42/StrongholdProtocolClient)；本分支对齐游戏本体 **v0.4.0**。
+> 版权、许可、以及本分支相对上游改了什么，见 **[NOTICE.md](NOTICE.md)**。
+> 自动更新默认关闭（本分支不带更新源）。遇到问题请提到**本仓库**的 Issues，不要去找原作者。
+
 把《卫戍协议：盟约》的浏览器客户端打成 **Windows 客户端**（Electron）和 **Android `.apk`**（Capacitor）：素材与代码从本地读（进对局不用重新下载约 260 MB 素材），房间、回合、联机仍然走服务器。
 
-`tools/package-client.mjs` 的代码默认值是 `localhost:3000`（自己开服用），但**发出去的产物不用它**：CI 打包时传 `--server http://150.158.38.174:3000/`，所以你现在下载的 exe/apk 里那份 `js/runtime-config.js` 写的是 `globalThis.__SP_SERVER__ = "http://150.158.38.174:3000/"`（0.3.0 起；此前是已下线的 `sp.lain42.top`）。想临时换服务器用 `--server <地址>` 或 `?server=`。
+`tools/package-client.mjs` 的代码默认值是 `localhost:3000`（自己开服用）。**发出去的产物连哪台，由打包时的 `--server <地址>` 决定**；不传就用 `localhost:3000`。玩家之后可以在选择页里换，或者用 `?server=` 临时指定。
 
 游戏本体（Node 服务器 + 浏览器客户端，GPL-3.0）是**另一个仓库**：上游 <https://github.com/sganggs/Stronghold-Protocol>。
 本仓库只放"壳"和打包流程，**从不修改游戏仓库**——客户端要的那 3 处改动以补丁形式打在 payload 上（见下）。
@@ -19,48 +24,46 @@ npm test                    # 打包流程的单元/契约测试（无游戏 che
 
 ## 玩家上手（不用会编译，只要装和玩）
 
-东西在 GitHub 的 **Releases** 里（仓库页 → Releases → 最新的 `v0.2.4-c40`），六个形态**都在同一个 Release 里**（从 c28 起 Tauri 安装器也放这儿了 —— F11 全屏要"新壳 + 新内置资源"两边都齐才生效，分两个 Release 反而容易装错）：
+东西发在**本仓库的 Releases** 里（仓库页 → Releases）。这一版对齐游戏本体 **0.4.0**，形态与文件名以那一次 Release 为准。
 
-| 你要玩的设备 | 下载 | 大小 | 怎么装 |
-|---|---|---|---|
-| Windows 10/11（64 位）· 推荐 | `StrongholdProtocol-desktop-win-0.2.4-c40.zip` | 743,588,314 B（约 709 MiB） | 解压，**整个文件夹一起放着**，双击里面的 `StrongholdProtocol.exe` |
-| Windows · 单文件（**启动慢就换上面目录版**） | `StrongholdProtocol-0.2.4-portable.exe` | 642,603,040 B（约 613 MiB） | 双击即可，但**每次启动都要把内置资源解到临时目录**（按 payload 大小；c32 那一次实测解出 974 MB），首屏慢十几到几十秒 |
-| Windows · 安装器 | `StrongholdProtocol-0.2.4-Setup.exe` | 642,813,205 B（约 613 MiB） | 装到开始菜单，之后与目录版是同一个东西 |
-| 安卓手机（Android 7.0 及以上） | `Stronghold-0.2.4-c40-android-release.apk` | 635,015,146 B（约 606 MiB） | 传到手机 → 点开除 → 允许"未知来源/安装未知应用"。**从 c22 及更早升级上来要先卸载一次**（签名换成固定钥匙了，见上那条说明） |
-| iPhone（iOS 15 及以上） | `Stronghold-0.2.4-c40-ios-unsigned.ipa` | 609,815,607 B（约 582 MiB） | **未签名**，要用你自己的 Apple ID 现签，见下一节 |
-| Windows · 试验（Tauri 壳，不用 Electron） | `StrongholdProtocolTauri-0.2.4-c40-setup.exe` | 553,946,248 B（约 528.3 MiB） | 比上面的安装器**小 84.8 MiB**；靠系统 WebView2。c25 去掉启动时的黑控制台窗口并让 **F2 重新选服务器可用**；c26 做了四件事：**一局里的几百个文件走少数几条连接**、**F12 能打开调试面板**（报"白屏/立绘没出来"时截图用得上）、第二次双击不再"没反应"、端口被占会当场说明而不是让你以为存档丢了；**c28 补上 F11 全屏**（以前只有 Electron 版有）。**c32 起桌面壳修掉一条 Windows 上的启动失败**：端口落在系统预留段（Hyper-V / WSL2 / Docker 会占一整段动态端口）时，原来会直接报错退出，现在按下一个可用端口接着找 |
+| 你要玩的设备 | 下载 | 怎么装 |
+|---|---|---|
+| Windows 10/11（64 位）· **推荐** | 桌面**目录版 zip** | 解压，**整个文件夹一起放着**，双击里面的 `StrongholdProtocol.exe` |
+| Windows · 单文件 | `*-portable.exe` | 双击即可，但**每次启动都要把内置资源解到临时目录**，首屏慢十几到几十秒——**启动慢就换上面的目录版** |
+| Windows · 安装器 | `*-Setup.exe` | 装到开始菜单，之后与目录版是同一个东西 |
+| 安卓手机（Android 7.0 及以上） | `*-android-release.apk` | 传到手机 → 点开除 → 允许"未知来源/安装未知应用"。升级时若报「与已安装应用签名不同 (-7)」，先卸载再装（见 `docs/ANDROID-SIGNING.md`） |
+| iPhone（iOS 15 及以上） | `*-ios-unsigned.ipa` | **未签名**，要用你自己的 Apple ID 现签，见下一节 |
 
 > **安卓升级说明（2026-10-07）**：c22 及更早的 APK 是用"每个构建机器现生成的一次性 debug 签名"打的，
 > 所以**从那些版本升级时会报「与已安装应用签名不同 (-7)」，需要先卸载再装**——卸载会清掉本机的干员调配与设置
 > （服务器侧的代号不受影响，重新填同一个服务器地址就能拿回来）。**从 c24 起**换成固定签名，以后覆盖安装不会再报这个。
 > 根因、钥匙、以及"每次构建都核对签名是不是同一把"的闸门见 `docs/ANDROID-SIGNING.md`。
 
-包里有 **833.1 MB 素材**（`assets/` 13,655 个文件：美术 / 骨骼 / 174 款时装 / 中日两语配音各 2,674 条），整个客户端 874.2 MB / 14,314 个文件，
-所以**进对局不需要再从网上下任何东西**；代价就是每个安装包都大。三种桌面形态与两种移动形态里那份素材是**同一份**
-（这一刀逐个文件核过：14,314 个文件，`dl.lain42.top` 与 Google 字体主机命中均为 0）。
+**联机怎么连**：这是个**自建服**的游戏——先开服务器，再用客户端连进去。
 
-国内下载慢可以试 OSS 镜像（同一批字节，文件名一致）——**但它现在不通**，见下面那条说明：
+1. 服务器：游戏本体 <https://github.com/sganggs/Stronghold-Protocol>，双击它目录里的 `scripts/start-windows.bat`
+   （首次运行会装依赖；不需要 git，下载源码压缩包解压即可）。
+2. 客户端：选择页里连 `localhost:3000`。同一台机器就是 `localhost:3000`；局域网里的另一台用 `<开服那台的IP>:3000`。
+3. 这一分支的默认地址就是 `localhost:3000`，也可以在选择页里临时填别的地址，或用 `?server=<地址>`。
 
-```
-https://dl.lain42.top/downloads/stronghold-protocol/0.1.3-c11/StrongholdProtocol-desktop-win-x64-0.1.3-c11.zip
-https://dl.lain42.top/downloads/stronghold-protocol/0.1.3-c11/Stronghold-0.1.3-c11-android-debug.apk
-```
+> ⚠️ 这一分支**不带自动更新**：客户端不会去问任何人的服务器要不要升级。要升级就重新下载一次安装包。
+> 另外客户端里没有 `CHANGELOG.md`，所以「发布说明」那一页是空的——不影响玩。
 
-> 这两条现在**别用**：`dl.lain42.top` 的 OSS 因欠费已经打不开（2026-10-07 实测：资产与站点根都回 **403**），
-> 文件名也还停在 `0.1.3-c11`。在没把镜像重新接通之前，请直接从上面的 GitHub Release 页下。
+素材随包发出（美术 / 音频 / 字体都在包里），所以**进对局不需要再从网上下任何东西**；代价就是安装包大。
+上游当年那份 OSS 镜像（`dl.lain42.top`）早已不可用，别再用它。
 
 不确定下到的文件是不是完好的，对一下指纹（GitHub 每个资产的 `digest` 就是 sha256）：
 
 ```
-sha256sum Stronghold-0.2.4-c40-android-release.apk
-gh api repos/lilyco-42/StrongholdProtocolClient/releases/tags/v0.2.4-c40 --jq '.assets[]|[.name,.digest]|@tsv'
+sha256sum <下载到的文件名>
+gh api repos/axdfczbh/StrongholdProtocolClient/releases --jq '.[0].tag_name as $t | .[0].assets[] | [$t, .name, .digest] | @tsv'
 ```
 两个 sha256 必须**逐字节相等**才算下载完好（不相等多半是没下全，重下即可）。
 
 ### 第一次打开
 
 1. 会先看到一个菜单页（不是直接进游戏）。选**多人游戏**。
-2. 列表里已经有几条可用的服务器了：`默认服务器 http://150.158.38.174:3000/`＋ 若干条**网友服**（`网友服 · misyra / rainya / rainya:10166 / linxia / xiaolubao`，第一次启动自动列进来）。哪条绿灯点哪条；网友服随关随开，**点了 × 就永久删掉**，不会下次又冒回来。旧的官方服 `sp.lain42.top` **已停止服务**，原地址现在只回一张关服公告（列出推荐的替代服）。
+2. 列表里默认是本机 `localhost:3000`；第一次启动还会自动列进若干条**网友服**（`网友服 · misyra / rainya / rainya:10166 / linxia / xiaolubao`）。哪条绿灯点哪条；网友服随关随开，**点了 × 就永久删掉**，不会下次又冒回来。上游那个官方服 `sp.lain42.top` 早已停止服务。
 3. 绿灯才是真能连进去（探测直接开 `/ws`，和进游戏用的是同一条通道；协议与路径的几种可能同时都试）。红灯会多说一句"对方在线，但 `/ws` 没通"，那是对方服务器的问题，不是你的地址写错了。双击进入。
 4. 想加自己知道的别的服：点**添加服务器**，名字随便填，地址**直接粘贴别人给你的网页链接**就行（`https://host/play` 这种也认）——**不用写 `ws://` 前缀**，也不用猜它挂在根路径还是 `/play`，程序两种都试。
 5. 之后想换服务器：桌面按 **F2**（或给 exe 加 `--choose-server`）；手机每次都回到这个菜单，属于有意为之——手机没有 F2，免得选完回不去。
@@ -76,17 +79,13 @@ gh api repos/lilyco-42/StrongholdProtocolClient/releases/tags/v0.2.4-c40 --jq '.
 | 最低系统 | **iOS 15 及以上**（Capacitor 8.5.2 的 SPM 声明 `.iOS(.v15)`，不是随手写的数字） |
 | 有效期 | 免费 Apple ID 签出来的包 **7 天过期**，到期要连电脑重签一次 |
 | 数量限制 | 同一个免费 Apple ID 最多 **3 个**自签应用（其中还要占一个给签名工具本身） |
-| 体积 | 约 582 MiB（c40 实测 609,815,607 B；美术音频全在包里，进对局不下载），建议 WiFi 下装，手机留出 2 GB 空闲（www 解出来本身就有 800 MB 多，c40 这一刀实测 874 MB） |
+| 体积 | 美术音频全在包里，进对局不下载；**以当次 Release 的实际大小为准**（0.4.0 的 payload 约 1.5 GB，ipa 会相应更大）。建议 WiFi 下装，手机留足空闲空间 |
 | 声音 | 首次点一下屏幕才有 BGM —— iOS 要求音频必须由用户手势解锁，游戏里已做（`audio.js` 的 `pointerdown/touchend/click/keydown`） |
 | 方向 | 锁横屏（`Info.plist` 只声明 LandscapeLeft/Right）；刘海区已按 `viewport-fit=cover` + safe-area 处理 |
 | 连自建服 | 已放开 ATS，所以 `ws://192.168.1.9:3000` 这种明文地址能连（对应安卓的 `allowMixedContent`） |
 | 立绘显示不上 | **从 c28 起**：打开客户端的选择页 →「多人游戏」→ 右上角「立绘自检」。它把「静态图片 / 取骨架文件 / Spine 解析 / 连续加载多个」分四层各测一次，页面顶部直接给一句结论，底下有「复制结果」——把这个发给开发者比截图有用得多（此前已排掉"文件没打进包"和"iOS WebKit 读不了这批图"两条，剩下的只有真机能分辨）。**c32 修的是这一页自己**：以前它问美术索引用错了键，在任何设备上都只会说"没找到带 spine 的干员"，而顶部结论却写"四层全通过" —— 现在它要么给出真正的分层结论，要么明确说"这一页什么都没证明"。按它会离开当前连接，不影响存档。查法与已排除项见 `docs/IOS-ART.md` |
 
-下载（和 exe/apk 在同一个 Release 页 `v0.2.4-c40`）：
-
-```
-https://github.com/lilyco-42/StrongholdProtocolClient/releases/download/v0.2.4-c40/Stronghold-0.2.4-c40-ios-unsigned.ipa
-```
+下载：和 exe/apk 在**本仓库同一个 Release 页**里，文件名形如 `Stronghold-<版本>-ios-unsigned.ipa`。
 
 装到手机的步骤（玩家自己做，我们不提供证书也不代签）：
 

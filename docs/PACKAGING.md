@@ -299,7 +299,10 @@ node scripts/notice.mjs --clear        # 撤回
 | `client.config.json` | `gameRoot`（默认 `../Stronghold-Protocol`）与 `defaultServer` |
 | `tools/check-payload-offline.mjs` | 离线闸门：payload / 桌面产物目录 / APK 三种目标都查「有没有外部字体主机、有没有 CDN 绝对地址、字体镜像在不在」。APK 走 `--zip` 按条目解开看 —— 整包 grep 是 0 命中，条目里才有 |
 | `tools/game-contract.mjs` | 复制了游戏仓库的 `DATA_SHIM_JS` 与 `SIM_PRIVATE`（这样构建不需要在游戏仓库里 `npm install`）；每次构建都对照 `server/index.js` 校验，不一致直接报错 |
-| `patches/game-client.patch` | 打在 payload 上的客户端改动（3 个文件、7 个 hunk，§1.2、§6）。它是 `git diff` 出来的普通补丁，由 `tools/unified-diff.mjs` 应用（不依赖 git）；**上游改了这个文件里的任一文件 → 补丁对不上 → 构建失败**，此时需要重新生成补丁 |
+| `patches/game-client.patch` | 打在 payload 上的客户端改动（5 个文件、9 个 hunk，§1.2、§6；0.4.0 里 net.js 的两个相邻 hunk 合并成一个）。除了服务器地址注入、选择页、邀请链接，还把 `index.html` 与 `dev/uikit.html` 的 Google 字体换成 payload 自带的镜像，并给 `js/media.js` 补上 `mediaAliasEnabled()` 这个开关（安卓那边靠它保留真实音频地址）。它是 `git diff` 出来的普通补丁，由 `tools/unified-diff.mjs` 应用（不依赖 git）；**上游改了这个文件里的任一文件 → 补丁对不上 → 构建失败**，此时需要重新生成补丁 |
+| `webfonts/google/**` | 113 个文件（`google.css` + 112 个 woff2，约 5 MB）的品牌字形镜像，由 `package-client.mjs` 原样铺进 payload 的 `webfonts/`。放**本仓库**而不是游戏仓，是因为上游从不提交 Google 的字形（游戏仓因此保持逐字节等于 upstream，`dirty:false` 才成立）；`tools/check-payload-offline.mjs` 会核「`google.css` 里每个 `url(/webfonts/google/*.woff2)` 都真有文件」 |
+| `tools/version-sets.mjs`、`tools/version-sets-child.mjs` | 把官方各版本的 `/cs/<cs16>/{index.json,bounds/official.json}` 生成进 payload。`public/js/content.js` 是**相对页面源**去取版本数据集的，打包客户端的页面源就是本地静态壳，所以这份清单必须在 payload 里；缺了它每个非默认版本都会「版本数据校验失败」，包括 0.4.0 的大厅默认版本规程·序列Ⅰ。字节由游戏仓库自己的 `server/plugins/identity.js` 算，与服务器发出去的完全一致 |
+| `desktop/serve.mjs` 的 `/cs/` 兜底 | payload 自带的是**打包源那份构建**的版本数据集。连一台别的构建（朋友的服、更新的版本）时，它的 cs16 不在 payload 里 → 壳在磁盘 404 之后才向 `build.json.server` 要一次，响应带 `X-SP-Content-Set: upstream`；超时或不可达就退回普通 404。清单本身被页面按 sha256 逐个核，所以转发的和自带的一样可信；本地有就永远走磁盘（离线/局域网不受影响）。只有 `/cs/` 会转发，`/data/`、`/servers.json`、`/healthz` 照旧是本地 404。见 `test/serve-content-set.test.js` |
 | `build/client/manifest.json`、payload 里的 `build.json` | 记录这次构建基于的游戏版本：`git describe` + commit + `PROTOCOL_VERSION` |
 
 | | 打包进去什么 |
