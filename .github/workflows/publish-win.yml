@@ -60,10 +60,16 @@ jobs:
       - name: 挑出目录版 zip，并逐个核对（出处 / cs 数据集 / 零外链）
         run: |
           set -euo pipefail
-          ZIP=$(find out -name '*desktop-win-*.zip' -type f | head -n1)
-          if [ -z "$ZIP" ]; then echo "artifact 里没有 *desktop-win-*.zip"; exit 1; fi
-          echo "ZIP=$ZIP"
-          echo "$ZIP" > zip-path.txt
+          # artifact 里的实际文件名（2026-11-19 实测）：StrongholdProtocol-desktop.zip、
+          # StrongholdProtocol-<ver>-portable.exe、StrongholdProtocol-<ver>-Setup.exe —— 都没有刀号。
+          ZIP=$(find out -name 'StrongholdProtocol-desktop*.zip' -type f | head -n1)
+          if [ -z "$ZIP" ]; then echo "artifact 里没有 StrongholdProtocol-desktop*.zip"; exit 1; fi
+          PORTABLE=$(find out -name '*-portable.exe' -type f | head -n1)
+          SETUP=$(find out -name '*-Setup.exe' -type f | head -n1)
+          if [ -z "$PORTABLE" ] || [ -z "$SETUP" ]; then echo "缺少 portable / Setup 形态"; exit 1; fi
+          echo "ZIP=$ZIP"; echo "PORTABLE=$PORTABLE"; echo "SETUP=$SETUP"
+
+          printf '%s\n%s\n%s\n' "$ZIP" "$PORTABLE" "$SETUP" > shapes.txt
 
           echo "--- resources/www/build.json ---"
           unzip -p "$ZIP" '*resources/www/build.json' | tee build.json
@@ -90,12 +96,17 @@ jobs:
           fi
           echo "ok：零外部字体主机"
 
-      - name: 发成 Release
+      - name: 发成 Release（三种 Windows 形态）
         run: |
           set -euo pipefail
-          ZIP=$(cat zip-path.txt)
-          ASSET="StrongholdProtocol-desktop-win-${TAG#v}.zip"
-          cp "$ZIP" "$ASSET"
+          VER="${TAG#v}"
+          ZIP=$(sed -n '1p' shapes.txt)
+          PORTABLE=$(sed -n '2p' shapes.txt)
+          SETUP=$(sed -n '3p' shapes.txt)
+          cp "$ZIP"      "StrongholdProtocol-desktop-win-${VER}.zip"
+          cp "$PORTABLE" "StrongholdProtocol-${VER}-portable.exe"
+          cp "$SETUP"    "StrongholdProtocol-${VER}-Setup.exe"
+          ls -la StrongholdProtocol-*
           cat > notes.md <<'EOF'
           社区维护分支，**非原作者发布**（原作品：[lilyco-42/StrongholdProtocolClient](https://github.com/lilyco-42/StrongholdProtocolClient)）。
 
@@ -103,16 +114,20 @@ jobs:
           - 含四个官方版本的 `/cs/` 数据集与自托管字体镜像，出厂页面**零第三方请求**
           - **本版只发 Windows**；自动更新默认关闭（不会去问任何人的服务器要新版）
           - 玩法是**自建服**：先起服务器（游戏本体里的 `scripts/start-windows.bat`），再让客户端连 `localhost:3000`
+          - 推荐用**目录版 zip**（解压后整个文件夹一起放着，双击里面的 exe）；单文件版每次启动都要解一遍内置资源，首屏慢
           - 代码 GPL-3.0-or-later；《明日方舟》美术/音频素材版权归鹰角网络 / Yostar，**不在 GPL 范围内**，
             仅限个人非商业游玩。完整声明见仓库 `NOTICE.md`
           EOF
           DRAFT=""
           if [ "${{ github.event.inputs.as_draft }}" = "yes" ]; then DRAFT="--draft"; fi
           if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "Release $TAG 已存在 —— 只上传/覆盖这一份资产"
-            gh release upload "$TAG" "$ASSET" --clobber
+            echo "Release $TAG 已存在 —— 上传/覆盖这三份资产"
+            gh release upload "$TAG" StrongholdProtocol-desktop-win-*.zip StrongholdProtocol-*-portable.exe StrongholdProtocol-*-Setup.exe --clobber
           else
-            gh release create "$TAG" "$ASSET" \
+            gh release create "$TAG" \
+              "StrongholdProtocol-desktop-win-${VER}.zip" \
+              "StrongholdProtocol-${VER}-portable.exe" \
+              "StrongholdProtocol-${VER}-Setup.exe" \
               --title "${{ github.event.inputs.title }}" \
               --notes-file notes.md $DRAFT
           fi
