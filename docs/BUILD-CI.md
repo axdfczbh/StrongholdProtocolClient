@@ -24,6 +24,11 @@
 
 1. `下载并解压 payload` → 文件数与大小；
 2. `校验 payload 完整性` → 四个关键文件在 + `assets` 文件数 > 3000；
+   ⚠️ 2026-11-19：这一条原来还要求 `dev/spine-probe.html` / `dev/spine-probe.js`（0.3.x 的「立绘自检」页）。
+   游戏本体 0.4.0 **已经删掉这一页**（`public/dev/` 里只剩 battle-perf / fx-viewer / game-mock / prefab-lab /
+   render-demo / sim-check / uikit），所以 0.4.0 的 payload 必然缺它、desktop 那条 job 在完整性闸门就红。
+   现在这 4 处 loop 只要求前四个文件。`tools/spine-probe-check.mjs` 与 `probe-art-engines.yml` 仍按老页面工作，
+   对 0.4.0 的产物是**没用的手动工具**，不是闸门。
 3. `校验 payload 版本（闸门）` → `expect_app` 必须等于 payload 的 `game.app`，并核 `server`；
 4. `payload 出处（闸门）` → `dirty:false` 且 describe 能追到 commit；
 5. `零外部依赖（闸门）` → 不许出现第三方字体主机 / CDN 绝对地址；
