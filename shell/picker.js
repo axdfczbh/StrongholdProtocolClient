@@ -429,7 +429,6 @@ function mount() {
           <div class="sp-pick__sub">STRONGHOLD PROTOCOL · MULTIPLAYER</div>
         </div>
         <div class="sp-pick__headbtns">
-          <button class="sp-pick__btn" id="sp-selftest" title="立绘或模型加载不上时，自检是哪一层（会离开当前连接）">立绘自检</button>
           <button class="sp-pick__btn" id="sp-refresh" title="重新测试各服务器延迟">刷新</button>
           <button class="sp-pick__btn" id="sp-back">返回</button>
         </div>
@@ -744,10 +743,8 @@ function mount() {
     } else {
       root.querySelector('#sp-back').addEventListener('click', () => { screen = 'home'; form = null; editingKey = null; setHint(''); layout(); });
       root.querySelector('#sp-refresh').addEventListener('click', refreshAll);
-      // 自检页是 payload 里的 `dev/spine-probe.html`（游戏仓），三端都发得出去；用绝对路径而不是拼 origin，
-      // 因为 Capacitor 的 origin 是 `capacitor://localhost` / `https://localhost`，桌面壳是 127.0.0.1 的某个端口。
-      // 这一步会离开当前连接，所以按钮标题里写明白了。
-      root.querySelector('#sp-selftest')?.addEventListener('click', () => { location.href = '/dev/spine-probe.html'; });
+      // 以前这里有个「立绘自检」按钮，链到游戏仓的 `dev/spine-probe.html`。**游戏本体 0.4.0 已经删掉那一页**，
+      // 所以按钮会 404 —— 按钮链到一个不存在的页面比没有按钮更糟，这里不再渲染它（见 test/picker.test.js）。
       root.querySelector('#sp-add').addEventListener('click', () => { const on = form !== 'add'; form = on ? 'add' : null; editingKey = null; setHint(''); renderForm(); });
       root.querySelector('#sp-direct').addEventListener('click', () => { const on = form !== 'direct'; form = on ? 'direct' : null; editingKey = null; setHint(''); renderForm(); });
       root.querySelector('#sp-edit').addEventListener('click', () => {

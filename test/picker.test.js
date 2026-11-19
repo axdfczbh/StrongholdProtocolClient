@@ -365,17 +365,17 @@ describe('the F11 hotkey', () => {
     assert.match(main, /key === 'f11'[\s\S]{0,80}setFullScreen/, 'desktop/main.mjs 仍要在原生层处理 F11');
   });
 
-  test('自检页在选择页上有入口，而且那个页面真的会打进 payload', () => {
+  test('自检页在游戏本体 0.4.0 已被移除，选择页不该再链过去', () => {
     const src = readFileSync(new URL('../shell/picker.js', import.meta.url), 'utf8')
       .split('\n').filter((l) => !/^\s*(?:\/\/|\*)/.test(l)).join('\n');
-    assert.match(src, /id="sp-selftest"/, '多人页要有一个能点的自检按钮 —— 玩家点不到的诊断页等于没有');
-    assert.match(src, /querySelector\('#sp-selftest'\)[\s\S]{0,60}location\.href = '\/dev\/spine-probe\.html'/,
-      '按钮必须真的接线（只加 markup 不加 listener 是这个 UI 最容易犯的错）');
-    // 路径是绝对 `/dev/…`：三端 origin 各不相同（capacitor://localhost、https://localhost、127.0.0.1:<抢到的端口>）
-    assert.doesNotMatch(src, /location\.origin \+ '\/dev\/spine-probe/, '拼 origin 是多余的，而且桌面壳端口会挪');
+    // 0.4.0 的 public/dev/ 里已经没有被检页面了（只剩 battle-perf / fx-viewer / game-mock / prefab-lab /
+    // render-demo / sim-check / uikit），所以那条「立绘自检」按钮点了必然 404。
+    // 这条测试原来断言相反的事（"按钮必须在、页面必须打进 payload"）；页面没了之后，正确的不变量就反过来了：
+    // **不要链到 payload 里不存在的页面**。
+    assert.doesNotMatch(src, /sp-selftest/, '按钮已移除：链接到不存在的页面比没有按钮更糟');
+    assert.doesNotMatch(src, /dev\/spine-probe\.html/, '不要再链到 dev/spine-probe.html');
     const wf = readFileSync(new URL('../.github/workflows/build-clients.yml', import.meta.url), 'utf8');
-    assert.match(wf, /for f in [^"\n]*dev\/spine-probe\.html/,
-      'CI 的 payload 完整性检查必须收这一页：按钮链到一个不存在的页面，比没有按钮更糟');
+    assert.doesNotMatch(wf, /dev\/spine-probe/, 'CI 的完整性闸门也不该再收这一页（0.4.0 没有它）');
   });
 
   test('JS 与 Rust 对这条路由的名字必须逐字一致', () => {
