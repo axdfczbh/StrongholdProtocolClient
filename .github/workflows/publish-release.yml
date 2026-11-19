@@ -54,6 +54,10 @@ jobs:
       # 没有 checkout 就没有 .git，gh 推断不出仓库（fatal: not a git repository）——必须显式给。
       GH_REPO: ${{ github.repository }}
       TAG: ${{ inputs.tag }}
+      # ⚠️ 必须在 job 级把 secret 落成 env：GitHub **不允许** 在 `if:` 里引用 `secrets.*`，
+      #    写在 step 的 if 里会让整个工作流判为无效（症状：`name` 退化成文件路径、dispatch 回 422、
+      #    每次 push 多出一条 0 job 的失败 run）。step 那边只判断 `env.QUARK_COOKIE != ''`。
+      QUARK_COOKIE: ${{ secrets.QUARK_COOKIE }}
     steps:
       - name: 下载 build-clients 产物
         uses: actions/download-artifact@v4
@@ -147,9 +151,8 @@ jobs:
         run: echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 
       - name: 上传到夸克网盘（GitHub-Releases/lilyco/<TAG>）
-        if: ${{ secrets.QUARK_COOKIE != '' }}
+        if: ${{ env.QUARK_COOKIE != '' }}
         env:
-          QUARK_COOKIE: ${{ secrets.QUARK_COOKIE }}
           QUARK_PARENT: ${{ inputs.quark_parent_fid }}
           TAG: ${{ inputs.tag }}
         run: |

@@ -319,6 +319,11 @@ jobs:
 
   # ---------- Android APK ----------
   android:
+    # 本分支只发 Windows。android 这条 lane 在缺 `ANDROID_KEYSTORE_BASE64`/`_PASSWORD` 时会硬失败
+    # （「准备固定签名钥匙」那一步 exit 1，见 docs/ANDROID-SIGNING.md），而 GitHub 不允许在 job 级 `if:`
+    # 里读 secrets —— 所以用仓库变量当开关：要出 apk 就设 Variable `SP_ANDROID_ENABLED=1` 并配好两个 secret，
+    # 没设就整条 lane skipped，不会把整次构建染红。
+    if: vars.SP_ANDROID_ENABLED == '1'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
