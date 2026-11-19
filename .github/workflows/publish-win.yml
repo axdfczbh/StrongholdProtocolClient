@@ -1,0 +1,120 @@
+# publish-win.yml — 把 build-clients 的 Windows 产物直接发成 Release。
+#
+# 为什么不走 publish-client.yml：那条 lane 会核对形态齐不齐（「半份客户端不发」），而本分支**只发 Windows**
+# （android lane 默认 skipped，见 build-clients.yml 的 SP_ANDROID_ENABLED）。这里只取
+# `stronghold-desktop-win` 一个 artifact，全程在 runner 内部搬运，不经过任何人的本机。
+#
+# 用法：
+#   gh workflow run publish-win.yml -f run_id=<build-clients run id> -f tag=v0.4.0
+name: publish-win
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: 'build-clients 的 run id'
+        required: true
+      tag:
+        description: '要发的 Release tag，例如 v0.4.0'
+        required: true
+      title:
+        description: 'Release 标题'
+        required: false
+        default: '卫戍协议：盟约 · 客户端 0.4.0（社区维护分支 · Windows）'
+      as_draft:
+        description: 'yes=先发草稿（玩家看不到）'
+        required: false
+        default: 'no'
+        type: choice
+        options:
+          - 'no'
+          - 'yes'
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      RUN_ID: ${{ github.event.inputs.run_id }}
+      TAG: ${{ github.event.inputs.tag }}
+    steps:
+      - name: 取 Windows artifact（runner 内部搬运，不经本机）
+        uses: actions/download-artifact@v4
+        with:
+          name: stronghold-desktop-win
+          path: out
+          run-id: ${{ github.event.inputs.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 里有什么形态
+        run: |
+          set -euo pipefail
+          ls -la out
+          find out -maxdepth 3 -type f -printf '%12s  %p\n' | sort -k2 | head -50
+
+      - name: 挑出目录版 zip，并逐个核对（出处 / cs 数据集 / 零外链）
+        run: |
+          set -euo pipefail
+          ZIP=$(find out -name '*desktop-win-*.zip' -type f | head -n1)
+          if [ -z "$ZIP" ]; then echo "artifact 里没有 *desktop-win-*.zip"; exit 1; fi
+          echo "ZIP=$ZIP"
+          echo "$ZIP" > zip-path.txt
+
+          echo "--- resources/www/build.json ---"
+          unzip -p "$ZIP" '*resources/www/build.json' | tee build.json
+          node -e '
+            const j = require("./build.json");
+            const g = j.game || {};
+            if (g.app !== "0.4.0") throw new Error("app 不是 0.4.0：" + g.app);
+            if (g.dirty !== false) throw new Error("dirty 不是 false");
+            if (!/-g[0-9a-f]{7,}$/.test(String(g.describe || ""))) throw new Error("describe 追不到 commit：" + g.describe);
+            console.log("provenance ok:", g.describe, "commit", g.commit);
+          '
+
+          echo "--- cs 版本数据集（应为 4 个）---"
+          COUNT=$(unzip -l "$ZIP" | grep -c 'resources/www/cs/[0-9a-f]\{16\}/index.json' || true)
+          echo "cs sets = $COUNT"
+          if [ "$COUNT" -ne 4 ]; then echo "cs 数据集不是 4 个"; exit 1; fi
+
+          echo "--- 出厂页面不许有第三方字体主机 ---"
+          if unzip -p "$ZIP" '*resources/www/index.html' | grep -q 'fonts.googleapis.com'; then
+            echo "index.html 仍带外链"; exit 1
+          fi
+          if unzip -p "$ZIP" '*resources/www/dev/uikit.html' | grep -q 'fonts.googleapis.com'; then
+            echo "dev/uikit.html 仍带外链"; exit 1
+          fi
+          echo "ok：零外部字体主机"
+
+      - name: 发成 Release
+        run: |
+          set -euo pipefail
+          ZIP=$(cat zip-path.txt)
+          ASSET="StrongholdProtocol-desktop-win-${TAG#v}.zip"
+          cp "$ZIP" "$ASSET"
+          cat > notes.md <<'EOF'
+          社区维护分支，**非原作者发布**（原作品：[lilyco-42/StrongholdProtocolClient](https://github.com/lilyco-42/StrongholdProtocolClient)）。
+
+          - 游戏本体：`sganggs/Stronghold-Protocol` @ `v0.4.0-1-g55f528e9`
+          - 含四个官方版本的 `/cs/` 数据集与自托管字体镜像，出厂页面**零第三方请求**
+          - **本版只发 Windows**；自动更新默认关闭（不会去问任何人的服务器要新版）
+          - 玩法是**自建服**：先起服务器（游戏本体里的 `scripts/start-windows.bat`），再让客户端连 `localhost:3000`
+          - 代码 GPL-3.0-or-later；《明日方舟》美术/音频素材版权归鹰角网络 / Yostar，**不在 GPL 范围内**，
+            仅限个人非商业游玩。完整声明见仓库 `NOTICE.md`
+          EOF
+          DRAFT=""
+          if [ "${{ github.event.inputs.as_draft }}" = "yes" ]; then DRAFT="--draft"; fi
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG 已存在 —— 只上传/覆盖这一份资产"
+            gh release upload "$TAG" "$ASSET" --clobber
+          else
+            gh release create "$TAG" "$ASSET" \
+              --title "${{ github.event.inputs.title }}" \
+              --notes-file notes.md $DRAFT
+          fi
+          gh release view "$TAG" --json tagName,isDraft,assets \
+            --jq '"tag=\(.tagName) draft=\(.isDraft)", (.assets[] | "\(.name)  \(.size) B  \(.digest // "")")'
